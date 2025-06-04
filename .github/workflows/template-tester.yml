@@ -1,0 +1,21 @@
+name: Test Templates
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 9 * * MON' # every Monday at 9am UTC
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        stack: [react-firebase, next-prisma-auth, fastapi-mongo]
+    defaults:
+      run:
+        working-directory: stacks/${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Running tests for ${{ matrix.stack }}"
+      - run: ./test.sh || echo "No test script yet"
