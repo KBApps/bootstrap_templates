@@ -1,0 +1,73 @@
+name: Auto Update & AI PR
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * 1"
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        stack: [react-firebase, fastapi-mongo, next-prisma-auth]
+    defaults:
+      run:
+        working-directory: stacks/${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. Bump dependencies
+      - name: Update JS dependencies
+        if: matrix.stack == 'react-firebase'
+        run: |
+          npm install -g npm-check-updates
+          ncu -u
+          npm install
+
+      - name: Update Python dependencies
+        if: matrix.stack == 'fastapi-mongo'
+        run: |
+          pip install -r requirements.txt --upgrade
+
+      # 2. Commit the changes to a new branch
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b update/${{ matrix.stack }}-$(date +%Y%m%d)
+          git add .
+          git commit -m "chore: auto-update dependencies"
+          git push origin HEAD
+
+      # 3. Run tests (optional: only PR if this passes)
+      - name: Run tests
+        run: ./test.sh
+
+      # 4. Call summarizer
+      - name: Summarize update with GPT
+        id: gpt_summary
+        run: |
+          node ../../tools/gpt-summarizer.js ${{ matrix.stack }} > ../../gpt-summary.txt
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      # 5. Extract PR title/body
+      - name: Extract PR title/body
+        id: extract_pr
+        run: |
+          TITLE=$(head -n 1 ../../gpt-summary.txt)
+          BODY=$(tail -n +2 ../../gpt-summary.txt)
+          echo "pr_title=$TITLE" >> $GITHUB_OUTPUT
+          echo "pr_body=$BODY" >> $GITHUB_OUTPUT
+
+      # 6. Create Pull Request
+      - name: Create Pull Request
+        run: |
+          gh pr create \
+            --title "${{ steps.extract_pr.outputs.pr_title }}" \
+            --body "${{ steps.extract_pr.outputs.pr_body }}" \
+            --head "update/${{ matrix.stack }}-$(date +%Y%m%d)" \
+            --base main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
